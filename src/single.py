@@ -7,6 +7,8 @@ import hashlib
 import os.path
 import re
 
+from util import *
+
 logging_format = f'%(asctime)s - %(levelname)s: %(message)s'
 logging_datefmt = '%d-%m-%y %H:%M:%S'
 logging.basicConfig(level=logging.INFO,
@@ -16,11 +18,11 @@ logging.basicConfig(level=logging.INFO,
 fileformat = logging.Formatter(logging_format, datefmt=logging_datefmt)
 
 logger = logging.getLogger('myLogger')
-handler = logging.FileHandler('mylog.log')
+handler = logging.FileHandler('logs/mylog.log')
 handler.setFormatter(fileformat)
 logger.addHandler(handler)
 
-errorLogHandler = logging.FileHandler('error.log')
+errorLogHandler = logging.FileHandler('logs/error.log')
 errorLogHandler.setLevel(logging.ERROR)
 errorLogHandler.setFormatter(fileformat)
 logger.addHandler(errorLogHandler)
@@ -40,23 +42,8 @@ def create_api(api_token, wait_on_rate_limit=False, wait_on_rate_limit_notify=Fa
     return api
 
 
-def get_hash(str_value, length=20):
-    sha = hashlib.sha256(str_value.encode())
-    hash_digest = sha.hexdigest()
-    return hash_digest[:length]
-
-
-def pickle_dump(data, filename):
-    with open(filename, 'wb') as f:
-        pickle.dump(data, f)
-
-
-with open('vault.pkl', 'rb') as f:
-    creds = pickle.load(f)
-
-with open('authors.pkl', 'rb') as f:
-    authors = pickle.load(f)
-
+creds = pickle_load('data/vault')
+authors = pickle_load('data/authors')
 
 MAX_WORKER = len(creds)
 
@@ -91,7 +78,7 @@ class Worker:
         except StopIteration:
             logger.info(f'[{self.author}] Has {len(self.friends)} friends')
             self.finish()
-            pickle_dump(authors, 'authors.pkl')
+            pickle_dump(authors, 'data/authors')
         except tw.TweepError as te:
             logger.error(f'[{self.author}] {te}')
             err_msg = str(te)
@@ -103,14 +90,14 @@ class Worker:
                 authors[self.author] = 4
             else:
                 authors[self.author] = -1
-            pickle_dump(authors, 'authors.pkl')
+            pickle_dump(authors, 'data/authors')
             self.next_()
 
     def checkpoint(self):
         hash_digest = get_hash(self.author)
         checkpoint_data = {'author': self.author, 'friends': self.friends,
                            'next_cursor': self.cursor.next_cursor}
-        pickle_dump(checkpoint_data, f'checkpoints/{hash_digest}.pkl')
+        pickle_dump(checkpoint_data, f'checkpoints/{hash_digest}')
         self.last_checkpoint = time.time()
 
     def next_(self):
@@ -118,7 +105,7 @@ class Worker:
         logger.info(f'Working on author {self.author}')
         # check in checkpoints
         hash_digest = get_hash(self.author)
-        checkpoint_name = f'checkpoints/{hash_digest}.pkl'
+        checkpoint_name = f'checkpoints/{hash_digest}'
         if os.path.exists(checkpoint_name):
             logger.info(f'Loading checkpoint {hash_digest}...')
             with open(checkpoint_name, 'rb') as f:
@@ -137,11 +124,11 @@ class Worker:
         new_friend_df['origin_friend'] = self.author
         # friend_df = pd.read_csv('friends.csv')
         # friend_df.append(new_friend_df).to_csv('friends.csv', index=None)
-        new_friend_df.to_csv('friends.csv', mode='a', index=None, header=None)
+        new_friend_df.to_csv('data/friends.csv', mode='a', index=None, header=None)
         authors[self.author] = 1
         hash_digest = get_hash(self.author)
         try:
-            os.remove(f'checkpoints/{hash_digest}.pkl')
+            os.remove(f'checkpoints/{hash_digest}')
         except FileNotFoundError:
             pass
         self.next_()
@@ -159,11 +146,11 @@ while True:
             worker.fetch_friends()
     except StopIteration:
         # All task finished (hopefully...)
-        pickle_dump(authors, 'authors.pkl')
+        pickle_dump(authors, 'data/authors')
         break
     except KeyboardInterrupt:
         logger.info('Saving to checkpoints...')
         for worker in workers:
             worker.checkpoint()
-        pickle_dump(authors, 'authors.pkl')
+        pickle_dump(authors, 'data/authors')
         break
