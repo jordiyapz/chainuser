@@ -1,3 +1,4 @@
+from src.util import StatusEnum
 import ray
 from ray.util.queue import Queue
 import tweepy as tw
@@ -43,10 +44,12 @@ class Fetcher:
 
                 except StopIteration:
                     should_get_next = True
+                    self._scheduler.set_job(self._author, StatusEnum.DONE)
 
                 except tw.TweepError as te:
                     should_get_next = True
                     print('TweepError:', te)
+                    self._scheduler.set_job(self._author, StatusEnum.OTHER)
 
                 if should_get_next:
                     try:
