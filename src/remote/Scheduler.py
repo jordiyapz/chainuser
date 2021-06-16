@@ -10,7 +10,7 @@ class Scheduler:
     def __init__(self, db_path):
         self._conn = sqlite3.connect(db_path)
         self.job_service = Jobs(self._conn)
-        self.idle_jobs = self.job_service.get_idle_jobs()
+        self.idle_jobs = self.job_service.get_by_status()
 
     def get_next(self):
         return next(self.idle_jobs)

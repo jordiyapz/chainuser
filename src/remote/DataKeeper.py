@@ -6,9 +6,10 @@ import time
 
 @ray.remote
 class DataKeeper:
-    def __init__(self, page_queue) -> None:
+    def __init__(self, page_queue, halt_signal) -> None:
         self._page_queue = page_queue
         self._conn = sql.connect('data/db.sqlite')
+        self._halt_signal = halt_signal
 
     def work(self) -> None:
         while True:
@@ -31,9 +32,15 @@ class DataKeeper:
                           if_exists='append', index=None)
                 self._conn.commit()
 
-                # next, do check whether queue is empty
-
+            elif ray.get(self._halt_signal.get.remote()):
+                break
             else:
                 # add some throttle to reduce cpu usage
                 # Make sure to abort this in emergency mode
-                time.sleep(300)  # sleep 5 sec
+                # sleep for 30 sec
+                ct = 0
+                while not ray.get(self._halt_signal.get.remote()):
+                    time.sleep(10)
+                    ct += 1
+                    if ct >= 3:
+                        break

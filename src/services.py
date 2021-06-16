@@ -21,8 +21,8 @@ class Jobs:
 
         self.conn.commit()
 
-    def get_idle_jobs(self):
+    def get_by_status(self, status=0):
         q = Query.from_(self.t).select(
-            self.t.screen_name).where(self.t.status == 0)
+            self.t.screen_name).where(self.t.status == status)
         res = self.conn.execute(q.get_sql()).fetchall()
         return (j[0] for j in res)
