@@ -3,11 +3,10 @@ import pandas as pd
 import tweepy as tw
 import logging
 import time
-import hashlib
 import os.path
 import re
 
-from util import *
+from src.util import *
 
 logging_format = f'%(asctime)s - %(levelname)s: %(message)s'
 logging_datefmt = '%d-%m-%y %H:%M:%S'
@@ -26,21 +25,6 @@ errorLogHandler = logging.FileHandler('logs/error.log')
 errorLogHandler.setLevel(logging.ERROR)
 errorLogHandler.setFormatter(fileformat)
 logger.addHandler(errorLogHandler)
-
-
-def create_api(api_token, wait_on_rate_limit=False, wait_on_rate_limit_notify=False):
-    # auth
-    auth = tw.OAuthHandler(
-        api_token['consumer_key'], api_token['consumer_secret'])
-    auth.set_access_token(
-        api_token['access_token'], api_token['access_token_secret'])
-
-    # api
-    api = tw.API(auth,
-                 wait_on_rate_limit=wait_on_rate_limit,
-                 wait_on_rate_limit_notify=wait_on_rate_limit_notify)
-    return api
-
 
 creds = pickle_load('data/vault')
 authors = pickle_load('data/authors')
@@ -124,7 +108,8 @@ class Worker:
         new_friend_df['origin_friend'] = self.author
         # friend_df = pd.read_csv('friends.csv')
         # friend_df.append(new_friend_df).to_csv('friends.csv', index=None)
-        new_friend_df.to_csv('data/friends.csv', mode='a', index=None, header=None)
+        new_friend_df.to_csv('data/friends.csv', mode='a',
+                             index=None, header=None)
         authors[self.author] = 1
         hash_digest = get_hash(self.author)
         try:
