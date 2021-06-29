@@ -1,6 +1,6 @@
 # Custom ignore
 .vscode/
-data/
+data*/
 checkpoints/
 logs/
 
