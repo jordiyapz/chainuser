@@ -5,6 +5,7 @@ import logging
 import time
 import os.path
 import re
+import sqlite3
 
 from src.util import *
 
@@ -26,12 +27,20 @@ errorLogHandler.setLevel(logging.ERROR)
 errorLogHandler.setFormatter(fileformat)
 logger.addHandler(errorLogHandler)
 
+conn = sqlite3.connect('data/db.sqlite')
+
 creds = pickle_load('data/vault')
-authors = pickle_load('data/authors')
+# authors = pickle_load('data/authors')
+jobs = conn.execute('select screen_name from jobs where status=0').fetchall()
+jobs = (name[0] for name in jobs)
 
 MAX_WORKER = len(creds)
 
-author_generator = (author for author in authors if authors[author] == 0)
+
+def set_status(screen_name, status=1):
+    conn.execute(
+        f'update jobs set status={status} where screen_name="{screen_name}"')
+    conn.commit()
 
 
 class Worker:
@@ -53,28 +62,31 @@ class Worker:
             friend_page = self.cursor.next()
             self.friends.extend(friend_page)
             logger.info(f'[{self.author}] Fetched {len(self.friends)} friends')
+
         except tw.RateLimitError:
             if self.last_checkpoint is None or \
                     (time.time() - self.last_checkpoint) > 8 * 60:
                 logger.info(
                     f'[{self.author}] Saving checkpoint {get_hash(self.author)}...')
                 self.checkpoint()
+
         except StopIteration:
             logger.info(f'[{self.author}] Has {len(self.friends)} friends')
             self.finish()
-            pickle_dump(authors, 'data/authors')
+
         except tw.TweepError as te:
             logger.error(f'[{self.author}] {te}')
             err_msg = str(te)
+
+            status = -1
             if err_msg == 'Not authorized.':
-                authors[self.author] = 2
+                status = 2
             elif err_msg[:12] == "[{'code': 34":
-                authors[self.author] = 3
+                status = 3
             elif re.match('Failed to send request: HTTPSConnectionPool', err_msg):
-                authors[self.author] = 4
-            else:
-                authors[self.author] = -1
-            pickle_dump(authors, 'data/authors')
+                status = 4
+
+            set_status(self.author, status)
             self.next_()
 
     def checkpoint(self):
@@ -85,7 +97,7 @@ class Worker:
         self.last_checkpoint = time.time()
 
     def next_(self):
-        self.author = next(author_generator)
+        self.author = next(jobs)
         logger.info(f'Working on author {self.author}')
         # check in checkpoints
         hash_digest = get_hash(self.author)
@@ -104,18 +116,22 @@ class Worker:
             self.create_cursor()
 
     def finish(self):
-        new_friend_df = pd.DataFrame((f._json for f in self.friends))
-        new_friend_df['origin_friend'] = self.author
-        # friend_df = pd.read_csv('friends.csv')
-        # friend_df.append(new_friend_df).to_csv('friends.csv', index=None)
-        new_friend_df.to_csv('data/friends.csv', mode='a',
-                             index=None, header=None)
-        authors[self.author] = 1
-        hash_digest = get_hash(self.author)
+        nf_df = pd.DataFrame((f._json for f in self.friends))
+        nf_df['origin_friend'] = self.author
+        nf_df.drop('id', axis=1, inplace=True)
+        nf_df['withheld_in_countries'] = nf_df['withheld_in_countries'].apply(
+            str)
+
+        nf_df.to_sql('friends', conn, index=None, if_exists='append')
+
+        set_status(self.author, 1)   # inside this is committing.
+
         try:
+            hash_digest = get_hash(self.author)
             os.remove(f'checkpoints/{hash_digest}')
         except FileNotFoundError:
             pass
+
         self.next_()
 
 
@@ -131,11 +147,9 @@ while True:
             worker.fetch_friends()
     except StopIteration:
         # All task finished (hopefully...)
-        pickle_dump(authors, 'data/authors')
         break
     except KeyboardInterrupt:
         logger.info('Saving to checkpoints...')
         for worker in workers:
             worker.checkpoint()
-        pickle_dump(authors, 'data/authors')
         break

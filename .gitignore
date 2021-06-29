@@ -1,8 +1,9 @@
 # Custom ignore
 .vscode/
-data/
+data*/
 checkpoints/
 logs/
+etc/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
