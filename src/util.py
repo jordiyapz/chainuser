@@ -66,3 +66,43 @@ def create_logger():
     logger.addHandler(errorLogHandler)
 
     return logger
+
+
+keys = ['origin_friend', 'id_str', 'name', 'screen_name', 'location', 'url',
+        'description', 'protected', 'followers_count', 'friends_count', 'listed_count',
+        'created_at', 'favourites_count', 'verified', 'statuses_count',
+        'contributors_enabled', 'profile_image_url_https', 'profile_banner_url',
+        'default_profile', 'default_profile_image', 'live_following', 'muting',
+        'blocking', 'blocked_by', 'withheld_in_countries']
+
+
+def save_data(conn, data, commit=True):
+    cur = conn.cursor()
+    sql = f'''
+        insert into friends ({",".join(keys)})
+        values ({",".join(["?"]*len(keys))})
+        '''
+    cur.executemany(sql, data)
+    if commit:
+        conn.commit()
+
+
+def parse_data(friends, author):
+    parsed_data = []
+
+    for friend in friends:
+        f_json = friend._json
+        f_json['origin_friend'] = author
+        f_json['withheld_in_countries'] = str(f_json['withheld_in_countries'])
+        parsed = tuple(f_json.get(key, None) for key in keys)
+
+        parsed_data.append(parsed)
+
+    return parsed_data
+
+
+def set_status(conn, screen_name, status=1):
+    cur = conn.cursor()
+    cur.execute('update jobs set status=? where screen_name=?',
+                (status, screen_name))
+    conn.commit()

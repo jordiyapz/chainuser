@@ -5,9 +5,22 @@ import logging
 import time
 import os.path
 import re
-import sqlite3
+import mariadb
+from configparser import ConfigParser
 
 from src.util import *
+
+
+def fetch_jobs(conn):
+    cur = conn.cursor()
+    cur.execute('select screen_name from jobs where status=0')
+    return cur.fetchall()
+
+
+config = ConfigParser()
+if not config.read('config.ini'):
+    raise FileNotFoundError('File "config.ini" not found')
+
 
 logging_format = f'%(asctime)s - %(levelname)s: %(message)s'
 logging_datefmt = '%d-%m-%y %H:%M:%S'
@@ -27,20 +40,15 @@ errorLogHandler.setLevel(logging.ERROR)
 errorLogHandler.setFormatter(fileformat)
 logger.addHandler(errorLogHandler)
 
-conn = sqlite3.connect('data/db.sqlite')
+conn = mariadb.connect(user=config['DB']['USER'], password=config['DB']['PASSWORD'],
+                       host=config['DB']['HOST'], database=config['DB']['NAME'])
 
 creds = pickle_load('data/vault')
-# authors = pickle_load('data/authors')
-jobs = conn.execute('select screen_name from jobs where status=0').fetchall()
-jobs = (name[0] for name in jobs)
+
+
+jobs = (name[0] for name in fetch_jobs(conn))
 
 MAX_WORKER = len(creds)
-
-
-def set_status(screen_name, status=1):
-    conn.execute(
-        f'update jobs set status={status} where screen_name="{screen_name}"')
-    conn.commit()
 
 
 class Worker:
@@ -86,7 +94,7 @@ class Worker:
             elif re.match('Failed to send request: HTTPSConnectionPool', err_msg):
                 status = 4
 
-            set_status(self.author, status)
+            set_status(conn, self.author, status)
             self.next_()
 
     def checkpoint(self):
@@ -101,35 +109,38 @@ class Worker:
         logger.info(f'Working on author {self.author}')
         # check in checkpoints
         hash_digest = get_hash(self.author)
-        checkpoint_name = f'checkpoints/{hash_digest}'
+        checkpoint_name = f'checkpoints/{hash_digest}.pkl'
+        # TODO: Fix Checkpoint issue
         if os.path.exists(checkpoint_name):
-            logger.info(f'Loading checkpoint {hash_digest}...')
             with open(checkpoint_name, 'rb') as f:
                 data = pickle.load(f)
             assert self.author == data['author']
             self.friends = data['friends']
             self.create_cursor(data['next_cursor'])
             self.last_checkpoint = time.time()
+            logger.info(
+                f'Loaded {len(self.friends)} {self.author}\'s friends from {hash_digest}')
         else:
             self.friends = []
             self.last_checkpoint = None
             self.create_cursor()
 
     def finish(self):
-        nf_df = pd.DataFrame((f._json for f in self.friends))
-        if len(nf_df.index) > 0:
-            nf_df['origin_friend'] = self.author
-            nf_df.drop('id', axis=1, inplace=True)
-            nf_df['withheld_in_countries'] = nf_df['withheld_in_countries'].apply(str)
-            nf_df.to_sql('friends', conn, index=None, if_exists='append')
-
-        set_status(self.author, 1)   # inside this is committing.
-
         try:
-            hash_digest = get_hash(self.author)
-            os.remove(f'checkpoints/{hash_digest}')
-        except FileNotFoundError:
-            pass
+            if len(self.friends) > 0:
+                save_data(conn, parse_data(
+                    self.friends, self.author), commit=False)
+            set_status(conn, self.author, 1)   # inside this is committing.
+            try:
+                hash_digest = get_hash(self.author)
+                os.remove(f'checkpoints/{hash_digest}')
+            except FileNotFoundError:
+                pass
+        except mariadb.InterfaceError as error:
+            if error.message == 'Lost connection to MySQL server during query':
+                print(error.message)
+                self.checkpoint()
+            print(error)
 
         self.next_()
 
@@ -152,3 +163,5 @@ while True:
         for worker in workers:
             worker.checkpoint()
         break
+
+conn.close()

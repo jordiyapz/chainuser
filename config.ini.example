@@ -1,0 +1,8 @@
+[DB]
+USER =
+PASSWORD =
+HOST =
+NAME =
+
+[TEST]
+DB_NAME =
