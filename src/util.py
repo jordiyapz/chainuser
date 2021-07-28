@@ -1,5 +1,7 @@
 import hashlib
 import pickle
+from sqlalchemy import create_engine
+from sqlalchemy.orm.session import sessionmaker
 import tweepy as tw
 import logging
 
@@ -106,3 +108,27 @@ def set_status(conn, screen_name, status=1):
     cur.execute('update jobs set status=? where screen_name=?',
                 (status, screen_name))
     conn.commit()
+
+
+def create_db_engine(user, password, host, database, port=3306, pool_pre_ping=False):
+    db_engine = create_engine(
+        f'mariadb+mariadbconnector://{user}:{password}@{host}:{port}/{database}',
+        pool_pre_ping=pool_pre_ping)
+    return db_engine
+
+
+def create_session(db_engine):
+    Session = sessionmaker()
+    Session.configure(bind=db_engine)
+    session = Session()
+
+    return session
+
+
+def create_api_v2(credential):
+    # auth
+    auth = tw.OAuthHandler(credential.api_key, credential.secret)
+    auth.set_access_token(credential.access_token,
+                          credential.access_secret)
+    api = tw.API(auth)
+    return api
